@@ -20,6 +20,12 @@ paper results have been reviewed.
 
 Both are reasonable starting points, **not proven money-makers**. Backtest on real data first.
 
+**Backtest (Kraken 4h data, Jan 2025 to Nov 2026, fees and funding included):** 2025: +14.7%, worst drawdown
+6.6%. 2026: +14.8%, worst drawdown 5.8%. Whole period: +30.9% ($500 to $654), all six coins net positive, kill
+switch never tripped. The SOL/XRP/POL/ARB settings were carried over from ETH rather than tuned on those coins,
+and all 18 nearby variations (lookback 20/40, stop 2-3 ATR, trail 3-8 ATR) also made money in both years.
+Past results do not predict future ones.
+
 ## Quick start
 ```bash
 python -m venv .venv && source .venv/bin/activate
