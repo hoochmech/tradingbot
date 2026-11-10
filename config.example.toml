@@ -1,0 +1,26 @@
+# Copy to config.toml and edit. Live mode is disabled in code until paper trading has been reviewed.
+mode = "paper"                 # backtest | paper | live
+exchange = "krakenfutures"      # ccxt exchange id for Kraken derivatives
+symbol = "BTC/USD:USD"         # Kraken PF_XBTUSD linear perp
+timeframe = "1h"
+starting_equity = 500.0
+taker_fee_pct = 0.05
+funding_rate_per_8h_pct = 0.01
+kill_switch_file = "KILL"
+
+[risk]                         # hard ceilings in bot/config.py: 5x leverage, 2%/trade, 5%/day
+max_leverage = 3.0
+risk_per_trade_pct = 1.0       # $5 on a $500 account if the stop is hit
+daily_loss_limit_pct = 3.0     # no new trades for the rest of the UTC day
+max_drawdown_pct = 15.0        # kill switch trips, bot goes flat and stops
+max_open_positions = 1
+min_liq_buffer_pct = 50.0
+maintenance_margin_pct = 1.0
+
+[strategy]
+name = "ema_trend"
+fast_ema = 20
+slow_ema = 50
+atr_period = 14
+atr_stop_mult = 2.0
+atr_target_mult = 4.0

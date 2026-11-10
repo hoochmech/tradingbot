@@ -1,0 +1,8 @@
+.env
+config.toml
+state/
+data/*.csv
+KILL
+__pycache__/
+.pytest_cache/
+.venv/
