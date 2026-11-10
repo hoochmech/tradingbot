@@ -89,3 +89,15 @@ def test_sleeve_leverage_still_hard_capped():
     sc = SleeveConfig("x", 1, "X/USD:USD", "breakout", max_leverage=20, risk_per_trade_pct=9)
     r = cfg.sleeve_risk(sc)
     assert r.max_leverage == HARD_MAX_LEVERAGE and r.risk_per_trade_pct == 2.0
+
+
+def test_breakout_trend_filter_blocks_countertrend_longs():
+    import pandas as pd
+    from bot.strategy import breakout
+    # long downtrend, then a pop above the recent range that is still below the 200 EMA
+    closes = [200 - i * 0.5 for i in range(250)] + [80, 81, 82, 95]
+    df = pd.DataFrame({"open": closes, "high": [c + 0.5 for c in closes], "low": [c - 0.5 for c in closes],
+                       "close": closes, "volume": 1.0})
+    p = {"lookback": 20, "atr_period": 14, "atr_stop_mult": 2, "atr_target_mult": 4}
+    assert breakout(df, p).side == "long"
+    assert breakout(df, {**p, "trend_ema": 200}) is None

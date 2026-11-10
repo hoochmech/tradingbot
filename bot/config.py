@@ -48,15 +48,16 @@ class SleeveConfig:
 def default_sleeves() -> list[SleeveConfig]:
     return [
         SleeveConfig(
-            name="safe", weight=1, symbol="BTC/USD:USD", strategy="ema_trend",
+            name="safe", weight=1, symbol="BTC/USD:USD", strategy="breakout",
             max_leverage=2.0, risk_per_trade_pct=0.75,
-            params={"fast_ema": 20, "slow_ema": 50, "trend_ema": 200,
-                    "atr_period": 14, "atr_stop_mult": 2.5, "atr_target_mult": 5.0},
+            params={"lookback": 40, "trend_ema": 200,
+                    "atr_period": 14, "atr_stop_mult": 3.0, "atr_target_mult": 9.0},
         ),
         SleeveConfig(
             name="aggressive", weight=2, symbol="ETH/USD:USD", strategy="breakout",
             max_leverage=4.0, risk_per_trade_pct=1.5,
-            params={"lookback": 20, "atr_period": 14, "atr_stop_mult": 1.5, "atr_target_mult": 3.0},
+            params={"lookback": 40, "trend_ema": 200,
+                    "atr_period": 14, "atr_stop_mult": 2.5, "atr_target_mult": 5.0},
         ),
     ]
 
@@ -65,7 +66,7 @@ def default_sleeves() -> list[SleeveConfig]:
 class Config:
     mode: str = "paper"                  # backtest | paper | live
     exchange: str = "krakenfutures"
-    timeframe: str = "1h"
+    timeframe: str = "4h"
     starting_equity: float = 500.0
     taker_fee_pct: float = 0.05
     funding_rate_per_8h_pct: float = 0.01

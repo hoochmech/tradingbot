@@ -1,7 +1,7 @@
 # Copy to config.toml and edit. Live mode is disabled in code until paper trading has been reviewed.
 mode = "paper"                 # backtest | paper | live
 exchange = "krakenfutures"     # ccxt exchange id (see README about Kraken US accounts)
-timeframe = "1h"
+timeframe = "4h"               # 4-hour candles: fewer trades, much less lost to fees than 1h
 starting_equity = 500.0
 taker_fee_pct = 0.05
 funding_rate_per_8h_pct = 0.01
@@ -21,16 +21,16 @@ maintenance_margin_pct = 1.0
 name = "safe"
 weight = 1
 symbol = "BTC/USD:USD"
-strategy = "ema_trend"         # trend-following, only trades with the long-term trend
+strategy = "breakout"          # breaks of the 40-candle range, only in the 200 EMA trend direction, wide stop, 3:1 target
 max_leverage = 2.0
 risk_per_trade_pct = 0.75      # ~$1.25 lost if a stop is hit
-params = { fast_ema = 20, slow_ema = 50, trend_ema = 200, atr_period = 14, atr_stop_mult = 2.5, atr_target_mult = 5.0 }
+params = { lookback = 40, trend_ema = 200, atr_period = 14, atr_stop_mult = 3.0, atr_target_mult = 9.0 }
 
 [[sleeves]]
 name = "aggressive"
 weight = 2
 symbol = "ETH/USD:USD"
-strategy = "breakout"          # buys/sells breaks of the 20-bar range
+strategy = "breakout"          # same idea on ETH, tighter stop, 2:1 target, bigger risk per trade
 max_leverage = 4.0
 risk_per_trade_pct = 1.5       # ~$5 lost if a stop is hit
-params = { lookback = 20, atr_period = 14, atr_stop_mult = 1.5, atr_target_mult = 3.0 }
+params = { lookback = 40, trend_ema = 200, atr_period = 14, atr_stop_mult = 2.5, atr_target_mult = 5.0 }
