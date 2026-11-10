@@ -6,16 +6,25 @@ Automated long/short trading for crypto perpetual futures, built risk-first for 
 until Kraken API access for your account is confirmed, orders are tested on Kraken's demo exchange, and
 paper results have been reviewed.
 
-## How it trades: 1:2 safe vs aggressive
-The account is split into two "sleeves", each running its own strategy on its own coin:
-
-| Sleeve | Share | Coin | Strategy | Max leverage | Risk per trade |
+## How it trades: 1:2 safe vs aggressive, six coins
+| Group | Share | Coins | Max leverage | Risk per trade | Stop |
 |---|---|---|---|---|---|
-| safe | 1/3 (~$167) | BTC | Trend-following: EMA 20/50 crossover, only in the direction of the 200 EMA, wide stops | 2x | 0.75% (~$1.25) |
-| aggressive | 2/3 (~$333) | ETH | Breakout: enters when price breaks the last 20 bars' high or low, tighter stops | 4x | 1.5% (~$5) |
+| safe | 1/3 (~$167, split evenly) | BTC, ETH | 2x | 0.75% of the coin's slice | 3 ATR, then trails 6 ATR behind the best price |
+| aggressive | 2/3 (~$333, split evenly) | SOL, XRP, POL, ARB | 4x | 1.5% of the coin's slice | 2.5 ATR, then trails 5 ATR behind |
 
-Every trade has a stop-loss and a profit target about twice as far away as the stop.
-Both strategies are reasonable starting points, **not proven money-makers**. Backtest on real data first.
+- **Signal:** price closes beyond the high or low of the last 40 four-hour candles, only in the direction of the 200 EMA trend.
+- **Entries are limit orders** at the signal price (maker fee 0.02% instead of 0.05%). If price doesn't come back to fill it within one candle, the order is cancelled and the trade is skipped.
+- **Trailing stops:** the stop starts at a fixed distance, then follows the best price reached and never moves backwards, so big trends can run.
+- **Volatility sizing:** each trade's risk is scaled between 0.5x and 1.25x depending on whether the coin is wilder or calmer than usual. The 2% hard ceiling still applies.
+- Total money at risk if every coin hits its stop at once stays about the same as the two-coin version, because each coin gets a smaller slice.
+
+Both are reasonable starting points, **not proven money-makers**. Backtest on real data first.
+
+**Backtest (Kraken 4h data, Jan 2025 to Nov 2026, fees and funding included):** 2025: +14.7%, worst drawdown
+6.6%. 2026: +14.8%, worst drawdown 5.8%. Whole period: +30.9% ($500 to $654), all six coins net positive, kill
+switch never tripped. The SOL/XRP/POL/ARB settings were carried over from ETH rather than tuned on those coins,
+and all 18 nearby variations (lookback 20/40, stop 2-3 ATR, trail 3-8 ATR) also made money in both years.
+Past results do not predict future ones.
 
 ## Quick start
 ```bash

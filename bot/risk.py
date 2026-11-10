@@ -14,6 +14,7 @@ class OrderIntent:
     entry: float
     stop: float
     target: float | None = None
+    atr: float | None = None     # volatility at signal time, used for trailing stops and vol sizing
 
 
 @dataclass
@@ -84,7 +85,10 @@ class RiskManager:
             return False, "max open positions"
         return True, "ok"
 
-    def approve(self, intent: OrderIntent, equity: float, open_positions: int) -> ApprovedOrder:
+    def approve(self, intent: OrderIntent, equity: float, open_positions: int,
+                risk_scale: float = 1.0) -> ApprovedOrder:
+        """Size and check an order. risk_scale (volatility sizing) adjusts risk per trade but can never
+        push it past the hard ceiling."""
         ok, why = self.can_trade(equity, open_positions)
         if not ok:
             raise RiskRejected(why)
@@ -96,7 +100,9 @@ class RiskManager:
         if stop_dist <= 0:
             raise RiskRejected("stop is on the wrong side of entry")
 
-        risk_usd = equity * self.cfg.risk_per_trade_pct / 100
+        from .config import HARD_MAX_RISK_PER_TRADE_PCT
+        risk_pct = min(self.cfg.risk_per_trade_pct * max(risk_scale, 0.0), HARD_MAX_RISK_PER_TRADE_PCT)
+        risk_usd = equity * risk_pct / 100
         qty = risk_usd / stop_dist
         notional = qty * intent.entry
         max_notional = equity * self.cfg.max_leverage

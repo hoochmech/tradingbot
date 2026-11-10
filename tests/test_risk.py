@@ -67,20 +67,23 @@ def test_kill_file(tmp_path):
     assert not r.can_trade(500, 0)[0]
 
 
-def test_backtest_runs_both_sleeves():
+def test_backtest_runs_all_coins():
     cfg = Config()
     s = run_backtest(synthetic_data(cfg), cfg).summary()
-    assert set(s["sleeves"]) == {"safe", "aggressive"}
+    assert set(s["net_pnl_by_group"]) == {"safe", "aggressive"}
+    assert len(s["sleeves"]) == 6
     assert all(v["liquidations"] == 0 for v in s["sleeves"].values())
-    assert s["sleeves"]["aggressive"]["trades"] > 0
+    assert sum(v["trades"] for v in s["sleeves"].values()) > 0
 
 
 def test_capital_split_is_one_to_two():
     from bot.portfolio import Portfolio
     pf = Portfolio(Config(), "__none__")
-    cash = {s.cfg.name: s.broker.cash for s in pf.sleeves}
-    assert cash["aggressive"] == pytest.approx(2 * cash["safe"])
-    assert sum(cash.values()) == pytest.approx(500)
+    by_group = {}
+    for sl in pf.sleeves:
+        by_group[sl.cfg.group] = by_group.get(sl.cfg.group, 0) + sl.broker.cash
+    assert by_group["aggressive"] == pytest.approx(2 * by_group["safe"])
+    assert sum(by_group.values()) == pytest.approx(500)
 
 
 def test_sleeve_leverage_still_hard_capped():
@@ -89,3 +92,15 @@ def test_sleeve_leverage_still_hard_capped():
     sc = SleeveConfig("x", 1, "X/USD:USD", "breakout", max_leverage=20, risk_per_trade_pct=9)
     r = cfg.sleeve_risk(sc)
     assert r.max_leverage == HARD_MAX_LEVERAGE and r.risk_per_trade_pct == 2.0
+
+
+def test_breakout_trend_filter_blocks_countertrend_longs():
+    import pandas as pd
+    from bot.strategy import breakout
+    # long downtrend, then a pop above the recent range that is still below the 200 EMA
+    closes = [200 - i * 0.5 for i in range(250)] + [80, 81, 82, 95]
+    df = pd.DataFrame({"open": closes, "high": [c + 0.5 for c in closes], "low": [c - 0.5 for c in closes],
+                       "close": closes, "volume": 1.0})
+    p = {"lookback": 20, "atr_period": 14, "atr_stop_mult": 2, "atr_target_mult": 4}
+    assert breakout(df, p).side == "long"
+    assert breakout(df, {**p, "trend_ema": 200}) is None

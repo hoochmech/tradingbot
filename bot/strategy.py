@@ -1,9 +1,10 @@
 """Strategies. Each takes a candle frame plus params and returns an OrderIntent for the last closed bar, or None.
 
-- ema_trend ("safe"): trades EMA crossovers only in the direction of the long-term trend, with wide stops.
-- breakout ("aggressive"): enters when price breaks the recent high/low range, with tighter stops.
+- ema_trend: trades EMA crossovers, optionally only in the direction of the long-term trend.
+- breakout: enters when price breaks the recent high/low range, optionally only in the direction of the
+  long-term trend (trend_ema).
 
-Both aim for a 2:1 reward-to-risk target. Neither is a proven edge. Backtest on real data before trusting them.
+Exits use either a fixed profit target or a trailing stop (see config). Neither is a proven edge. Backtest on real data before trusting them.
 """
 from __future__ import annotations
 
@@ -23,10 +24,13 @@ def atr(df: pd.DataFrame, period: int) -> pd.Series:
 
 
 def _intent(side: str, entry: float, a: float, p: dict) -> OrderIntent:
-    s, t = p["atr_stop_mult"] * a, p["atr_target_mult"] * a
+    """Stop at atr_stop_mult x ATR. Fixed target at atr_target_mult x ATR, or none when the sleeve
+    uses a trailing stop instead (atr_target_mult missing or 0)."""
+    s = p["atr_stop_mult"] * a
+    t = (p.get("atr_target_mult") or 0) * a
     if side == "long":
-        return OrderIntent("long", entry, entry - s, entry + t)
-    return OrderIntent("short", entry, entry + s, entry - t)
+        return OrderIntent("long", entry, entry - s, entry + t if t else None, a)
+    return OrderIntent("short", entry, entry + s, entry - t if t else None, a)
 
 
 def ema_trend(df: pd.DataFrame, p: dict) -> OrderIntent | None:
@@ -55,9 +59,12 @@ def breakout(df: pd.DataFrame, p: dict) -> OrderIntent | None:
     prior = df.iloc[-n - 1:-1]
     cur = df.iloc[-1]
     a = float(atr(df, p["atr_period"]).iloc[-1])
-    if cur.close > prior["high"].max():
+    trend = None
+    if p.get("trend_ema"):
+        trend = float(df["close"].ewm(span=p["trend_ema"], adjust=False).mean().iloc[-1])
+    if cur.close > prior["high"].max() and (trend is None or cur.close > trend):
         return _intent("long", float(cur.close), a, p)
-    if cur.close < prior["low"].min():
+    if cur.close < prior["low"].min() and (trend is None or cur.close < trend):
         return _intent("short", float(cur.close), a, p)
     return None
 
