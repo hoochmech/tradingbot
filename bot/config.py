@@ -31,32 +31,65 @@ class RiskConfig:
 
 
 @dataclass
-class StrategyConfig:
-    name: str = "ema_trend"
-    fast_ema: int = 20
-    slow_ema: int = 50
-    atr_period: int = 14
-    atr_stop_mult: float = 2.0
-    atr_target_mult: float = 4.0
+class SleeveConfig:
+    """One slice of the account running one strategy on one market.
+
+    Sleeves trade different symbols so their positions never net against each other on the exchange.
+    """
+    name: str
+    weight: float                        # share of the account, e.g. 1 and 2 for a 1:2 split
+    symbol: str
+    strategy: str                        # key in bot.strategy.STRATEGIES
+    max_leverage: float
+    risk_per_trade_pct: float            # % of this sleeve's equity per trade
+    params: dict = field(default_factory=dict)
+
+
+def default_sleeves() -> list[SleeveConfig]:
+    return [
+        SleeveConfig(
+            name="safe", weight=1, symbol="BTC/USD:USD", strategy="ema_trend",
+            max_leverage=2.0, risk_per_trade_pct=0.75,
+            params={"fast_ema": 20, "slow_ema": 50, "trend_ema": 200,
+                    "atr_period": 14, "atr_stop_mult": 2.5, "atr_target_mult": 5.0},
+        ),
+        SleeveConfig(
+            name="aggressive", weight=2, symbol="ETH/USD:USD", strategy="breakout",
+            max_leverage=4.0, risk_per_trade_pct=1.5,
+            params={"lookback": 20, "atr_period": 14, "atr_stop_mult": 1.5, "atr_target_mult": 3.0},
+        ),
+    ]
 
 
 @dataclass
 class Config:
     mode: str = "paper"                  # backtest | paper | live
     exchange: str = "krakenfutures"
-    symbol: str = "BTC/USD:USD"
     timeframe: str = "1h"
     starting_equity: float = 500.0
     taker_fee_pct: float = 0.05
     funding_rate_per_8h_pct: float = 0.01
     kill_switch_file: str = "KILL"
     state_dir: str = "state"
-    risk: RiskConfig = field(default_factory=RiskConfig)
-    strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    heartbeat_hours: float = 6.0         # phone status update interval
+    risk: RiskConfig = field(default_factory=RiskConfig)      # account-wide loss limits and kill switch
+    sleeves: list[SleeveConfig] = field(default_factory=default_sleeves)
 
     @property
     def live(self) -> bool:
         return self.mode == "live"
+
+    def sleeve_risk(self, s: SleeveConfig) -> RiskConfig:
+        """Per-sleeve sizing limits. RiskConfig still clamps everything to the hard ceilings."""
+        return RiskConfig(
+            max_leverage=s.max_leverage,
+            daily_loss_limit_pct=self.risk.daily_loss_limit_pct,
+            max_drawdown_pct=self.risk.max_drawdown_pct,
+            min_liq_buffer_pct=self.risk.min_liq_buffer_pct,
+            maintenance_margin_pct=self.risk.maintenance_margin_pct,
+            risk_per_trade_pct=s.risk_per_trade_pct,
+            max_open_positions=1,
+        )
 
 
 def load_config(path: str | Path = "config.toml") -> Config:
@@ -65,10 +98,12 @@ def load_config(path: str | Path = "config.toml") -> Config:
         return Config()
     raw = tomllib.loads(path.read_text())
     risk = RiskConfig(**raw.pop("risk", {}))
-    strat = StrategyConfig(**raw.pop("strategy", {}))
-    cfg = Config(**raw, risk=risk, strategy=strat)
+    sleeves = [SleeveConfig(**s) for s in raw.pop("sleeves", [])] or default_sleeves()
+    cfg = Config(**raw, risk=risk, sleeves=sleeves)
     if cfg.mode not in {"backtest", "paper", "live"}:
         raise ValueError(f"unknown mode {cfg.mode!r}")
+    if len({s.symbol for s in cfg.sleeves}) != len(cfg.sleeves):
+        raise ValueError("each sleeve needs its own symbol")
     return cfg
 
 

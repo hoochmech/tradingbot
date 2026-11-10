@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bot.backtest import run_backtest, synthetic_ohlcv
+from bot.backtest import run_backtest, synthetic_data
 from bot.config import HARD_MAX_LEVERAGE, Config, RiskConfig
 from bot.risk import OrderIntent, RiskManager, RiskRejected
 
@@ -67,8 +67,25 @@ def test_kill_file(tmp_path):
     assert not r.can_trade(500, 0)[0]
 
 
-def test_backtest_runs_and_respects_limits():
-    res = run_backtest(synthetic_ohlcv(1500), Config())
-    s = res.summary()
-    assert s["trades"] > 0
-    assert s["liquidations"] == 0
+def test_backtest_runs_both_sleeves():
+    cfg = Config()
+    s = run_backtest(synthetic_data(cfg), cfg).summary()
+    assert set(s["sleeves"]) == {"safe", "aggressive"}
+    assert all(v["liquidations"] == 0 for v in s["sleeves"].values())
+    assert s["sleeves"]["aggressive"]["trades"] > 0
+
+
+def test_capital_split_is_one_to_two():
+    from bot.portfolio import Portfolio
+    pf = Portfolio(Config(), "__none__")
+    cash = {s.cfg.name: s.broker.cash for s in pf.sleeves}
+    assert cash["aggressive"] == pytest.approx(2 * cash["safe"])
+    assert sum(cash.values()) == pytest.approx(500)
+
+
+def test_sleeve_leverage_still_hard_capped():
+    from bot.config import SleeveConfig
+    cfg = Config()
+    sc = SleeveConfig("x", 1, "X/USD:USD", "breakout", max_leverage=20, risk_per_trade_pct=9)
+    r = cfg.sleeve_risk(sc)
+    assert r.max_leverage == HARD_MAX_LEVERAGE and r.risk_per_trade_pct == 2.0
