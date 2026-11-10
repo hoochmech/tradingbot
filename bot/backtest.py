@@ -1,4 +1,4 @@
-"""Bar-by-bar backtester that uses the same RiskManager and PaperBroker as paper trading."""
+"""Backtester that drives the same Portfolio (and risk checks) used for paper trading."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,83 +6,81 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .broker import PaperBroker, Trade
+from .broker import Trade
 from .config import Config
-from .risk import RiskManager, RiskRejected
-from .strategy import add_indicators, signal
-
-TF_HOURS = {"5m": 5 / 60, "15m": 0.25, "1h": 1, "4h": 4, "1d": 24}
+from .portfolio import TF_HOURS, Portfolio  # noqa: F401  (TF_HOURS re-exported for callers)
 
 
 @dataclass
 class Result:
     equity_curve: pd.Series
-    trades: list[Trade]
+    trades: dict[str, list[Trade]]
     killed_reason: str | None
     rejections: int
 
     def summary(self) -> dict:
         eq = self.equity_curve
         start, end = float(eq.iloc[0]), float(eq.iloc[-1])
-        dd = float((1 - eq / eq.cummax()).max() * 100)
-        wins = [t for t in self.trades if t.pnl > 0]
-        return {
+        out = {
             "start_equity": round(start, 2),
             "end_equity": round(end, 2),
             "return_pct": round(100 * (end / start - 1), 2),
-            "max_drawdown_pct": round(dd, 2),
-            "trades": len(self.trades),
-            "win_rate_pct": round(100 * len(wins) / len(self.trades), 1) if self.trades else 0.0,
-            "fees_paid": round(sum(t.fees for t in self.trades), 2),
-            "liquidations": sum(t.reason == "liquidated" for t in self.trades),
+            "max_drawdown_pct": round(float((1 - eq / eq.cummax()).max() * 100), 2),
             "risk_rejections": self.rejections,
             "killed": self.killed_reason,
+            "sleeves": {},
         }
+        for name, trades in self.trades.items():
+            wins = [t for t in trades if t.pnl > 0]
+            out["sleeves"][name] = {
+                "trades": len(trades),
+                "win_rate_pct": round(100 * len(wins) / len(trades), 1) if trades else 0.0,
+                "net_pnl": round(sum(t.pnl for t in trades), 2),
+                "fees_paid": round(sum(t.fees for t in trades), 2),
+                "liquidations": sum(t.reason == "liquidated" for t in trades),
+            }
+        return out
 
 
-def run_backtest(df: pd.DataFrame, cfg: Config) -> Result:
-    df = add_indicators(df, cfg.strategy)
-    risk = RiskManager(cfg.risk, kill_switch_file="__never__")
-    broker = PaperBroker(
-        cash=cfg.starting_equity,
-        taker_fee_pct=cfg.taker_fee_pct,
-        funding_per_8h_pct=cfg.funding_rate_per_8h_pct,
-        bar_hours=TF_HOURS.get(cfg.timeframe, 1),
+def run_backtest(data: dict[str, pd.DataFrame], cfg: Config) -> Result:
+    idx = None
+    for s in cfg.sleeves:
+        idx = data[s.symbol].index if idx is None else idx.intersection(data[s.symbol].index)
+    data = {sym: df.loc[idx] for sym, df in data.items()}
+    pf = Portfolio(cfg, kill_switch_file="__never__")
+    curve = []
+    for i in range(len(idx)):
+        frames = {s.symbol: data[s.symbol].iloc[max(0, i - 600): i + 1] for s in cfg.sleeves}
+        pf.step(frames, idx[i])
+        curve.append(pf.equity)
+    return Result(
+        pd.Series(curve, index=idx),
+        {s.cfg.name: s.broker.trades for s in pf.sleeves},
+        pf.guard.killed_reason,
+        pf.rejections,
     )
-    curve, rejections = [], 0
-    for i in range(len(df)):
-        bar = df.iloc[i]
-        ts = df.index[i]
-        broker.on_bar(bar.high, bar.low, bar.close, ts)
-        equity = broker.equity(bar.close)
-        risk.on_equity(equity, ts.to_pydatetime())
-        if risk.killed_reason and broker.position:
-            broker.close(bar.close, "kill_switch", ts)
-        intent = signal(df.iloc[: i + 1], cfg.strategy)
-        if intent:
-            if broker.position and broker.position.side != intent.side:
-                broker.close(bar.close, "reverse", ts)
-            if not broker.position:
-                try:
-                    o = risk.approve(intent, broker.equity(bar.close), 0)
-                    broker.open(o, ts)
-                except RiskRejected:
-                    rejections += 1
-        curve.append(broker.equity(bar.close))
-    return Result(pd.Series(curve, index=df.index), broker.trades, risk.killed_reason, rejections)
 
 
-def synthetic_ohlcv(n: int = 2000, seed: int = 0, start: float = 60000.0) -> pd.DataFrame:
+def synthetic_ohlcv(n: int = 2000, seed: int = 0, start: float = 60000.0, vol: float = 0.006) -> pd.DataFrame:
     """Random-walk candles for tests and demos. Not real market data."""
     rng = np.random.default_rng(seed)
-    rets = rng.normal(0, 0.006, n) + 0.002 * np.sin(np.arange(n) / 150)
+    rets = rng.normal(0, vol, n) + 0.002 * np.sin(np.arange(n) / 150 + seed)
     close = start * np.exp(np.cumsum(rets))
     open_ = np.r_[start, close[:-1]]
-    spread = np.abs(rng.normal(0, 0.003, n)) * close
+    spread = np.abs(rng.normal(0, vol / 2, n)) * close
     high = np.maximum(open_, close) + spread
     low = np.minimum(open_, close) - spread
     idx = pd.date_range("2025-01-01", periods=n, freq="1h", tz="UTC")
     return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": 1.0}, index=idx)
+
+
+def synthetic_data(cfg: Config, n: int = 2000) -> dict[str, pd.DataFrame]:
+    return {s.symbol: synthetic_ohlcv(n, seed=i, start=60000.0 / (i * 20 + 1), vol=0.006 + 0.002 * i)
+            for i, s in enumerate(cfg.sleeves)}
+
+
+def csv_name(symbol: str, timeframe: str) -> str:
+    return f"{symbol.replace('/', '-').replace(':', '_')}_{timeframe}.csv"
 
 
 def load_csv(path: str) -> pd.DataFrame:

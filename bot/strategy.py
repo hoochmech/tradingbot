@@ -1,37 +1,68 @@
-"""Starter strategy: EMA trend filter with ATR-based stops. Goes long or short.
+"""Strategies. Each takes a candle frame plus params and returns an OrderIntent for the last closed bar, or None.
 
-This is a placeholder to exercise the plumbing, not a proven edge. Backtest before trusting it.
+- ema_trend ("safe"): trades EMA crossovers only in the direction of the long-term trend, with wide stops.
+- breakout ("aggressive"): enters when price breaks the recent high/low range, with tighter stops.
+
+Both aim for a 2:1 reward-to-risk target. Neither is a proven edge. Backtest on real data before trusting them.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 import pandas as pd
 
-from .config import StrategyConfig
 from .risk import OrderIntent
 
 
-def add_indicators(df: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
-    df = df.copy()
-    df["ema_fast"] = df["close"].ewm(span=cfg.fast_ema, adjust=False).mean()
-    df["ema_slow"] = df["close"].ewm(span=cfg.slow_ema, adjust=False).mean()
+def atr(df: pd.DataFrame, period: int) -> pd.Series:
     prev_close = df["close"].shift()
     tr = pd.concat(
         [df["high"] - df["low"], (df["high"] - prev_close).abs(), (df["low"] - prev_close).abs()], axis=1
     ).max(axis=1)
-    df["atr"] = tr.ewm(alpha=1 / cfg.atr_period, adjust=False).mean()
-    return df
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
-def signal(df: pd.DataFrame, cfg: StrategyConfig) -> OrderIntent | None:
-    """Look at the last closed bar of an indicator frame and return an entry, or None."""
-    if len(df) < cfg.slow_ema + 2:
+def _intent(side: str, entry: float, a: float, p: dict) -> OrderIntent:
+    s, t = p["atr_stop_mult"] * a, p["atr_target_mult"] * a
+    if side == "long":
+        return OrderIntent("long", entry, entry - s, entry + t)
+    return OrderIntent("short", entry, entry + s, entry - t)
+
+
+def ema_trend(df: pd.DataFrame, p: dict) -> OrderIntent | None:
+    need = max(p["slow_ema"], p.get("trend_ema", 0)) + 2
+    if len(df) < need:
         return None
-    prev, cur = df.iloc[-2], df.iloc[-1]
-    crossed_up = prev.ema_fast <= prev.ema_slow and cur.ema_fast > cur.ema_slow
-    crossed_dn = prev.ema_fast >= prev.ema_slow and cur.ema_fast < cur.ema_slow
-    entry, atr = float(cur.close), float(cur.atr)
-    if crossed_up:
-        return OrderIntent("long", entry, entry - cfg.atr_stop_mult * atr, entry + cfg.atr_target_mult * atr)
-    if crossed_dn:
-        return OrderIntent("short", entry, entry + cfg.atr_stop_mult * atr, entry - cfg.atr_target_mult * atr)
+    c = df["close"]
+    fast = c.ewm(span=p["fast_ema"], adjust=False).mean()
+    slow = c.ewm(span=p["slow_ema"], adjust=False).mean()
+    trend = c.ewm(span=p.get("trend_ema", p["slow_ema"]), adjust=False).mean()
+    a = float(atr(df, p["atr_period"]).iloc[-1])
+    entry = float(c.iloc[-1])
+    up = fast.iloc[-2] <= slow.iloc[-2] and fast.iloc[-1] > slow.iloc[-1]
+    dn = fast.iloc[-2] >= slow.iloc[-2] and fast.iloc[-1] < slow.iloc[-1]
+    if up and entry > trend.iloc[-1]:
+        return _intent("long", entry, a, p)
+    if dn and entry < trend.iloc[-1]:
+        return _intent("short", entry, a, p)
     return None
+
+
+def breakout(df: pd.DataFrame, p: dict) -> OrderIntent | None:
+    n = p["lookback"]
+    if len(df) < max(n, p["atr_period"]) + 2:
+        return None
+    prior = df.iloc[-n - 1:-1]
+    cur = df.iloc[-1]
+    a = float(atr(df, p["atr_period"]).iloc[-1])
+    if cur.close > prior["high"].max():
+        return _intent("long", float(cur.close), a, p)
+    if cur.close < prior["low"].min():
+        return _intent("short", float(cur.close), a, p)
+    return None
+
+
+STRATEGIES: dict[str, Callable[[pd.DataFrame, dict], OrderIntent | None]] = {
+    "ema_trend": ema_trend,
+    "breakout": breakout,
+}
