@@ -67,20 +67,23 @@ def test_kill_file(tmp_path):
     assert not r.can_trade(500, 0)[0]
 
 
-def test_backtest_runs_both_sleeves():
+def test_backtest_runs_all_coins():
     cfg = Config()
     s = run_backtest(synthetic_data(cfg), cfg).summary()
-    assert set(s["sleeves"]) == {"safe", "aggressive"}
+    assert set(s["net_pnl_by_group"]) == {"safe", "aggressive"}
+    assert len(s["sleeves"]) == 6
     assert all(v["liquidations"] == 0 for v in s["sleeves"].values())
-    assert s["sleeves"]["aggressive"]["trades"] > 0
+    assert sum(v["trades"] for v in s["sleeves"].values()) > 0
 
 
 def test_capital_split_is_one_to_two():
     from bot.portfolio import Portfolio
     pf = Portfolio(Config(), "__none__")
-    cash = {s.cfg.name: s.broker.cash for s in pf.sleeves}
-    assert cash["aggressive"] == pytest.approx(2 * cash["safe"])
-    assert sum(cash.values()) == pytest.approx(500)
+    by_group = {}
+    for sl in pf.sleeves:
+        by_group[sl.cfg.group] = by_group.get(sl.cfg.group, 0) + sl.broker.cash
+    assert by_group["aggressive"] == pytest.approx(2 * by_group["safe"])
+    assert sum(by_group.values()) == pytest.approx(500)
 
 
 def test_sleeve_leverage_still_hard_capped():

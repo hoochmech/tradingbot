@@ -6,21 +6,19 @@ Automated long/short trading for crypto perpetual futures, built risk-first for 
 until Kraken API access for your account is confirmed, orders are tested on Kraken's demo exchange, and
 paper results have been reviewed.
 
-## How it trades: 1:2 safe vs aggressive
-The account is split into two "sleeves", each running its own strategy on its own coin:
-
-| Sleeve | Share | Coin | Strategy | Max leverage | Risk per trade |
+## How it trades: 1:2 safe vs aggressive, six coins
+| Group | Share | Coins | Max leverage | Risk per trade | Stop |
 |---|---|---|---|---|---|
-| safe | 1/3 (~$167) | BTC | Breakout of the last 40 four-hour candles, only in the direction of the 200 EMA; wide 3 ATR stop, 3:1 target | 2x | 0.75% (~$1.25) |
-| aggressive | 2/3 (~$333) | ETH | Same breakout idea; 2.5 ATR stop, 2:1 target | 4x | 1.5% (~$5) |
+| safe | 1/3 (~$167, split evenly) | BTC, ETH | 2x | 0.75% of the coin's slice | 3 ATR, then trails 6 ATR behind the best price |
+| aggressive | 2/3 (~$333, split evenly) | SOL, XRP, POL, ARB | 4x | 1.5% of the coin's slice | 2.5 ATR, then trails 5 ATR behind |
 
-Runs on 4-hour candles. Every trade has a stop-loss and a profit target 2-3x as far away as the stop.
+- **Signal:** price closes beyond the high or low of the last 40 four-hour candles, only in the direction of the 200 EMA trend.
+- **Entries are limit orders** at the signal price (maker fee 0.02% instead of 0.05%). If price doesn't come back to fill it within one candle, the order is cancelled and the trade is skipped.
+- **Trailing stops:** the stop starts at a fixed distance, then follows the best price reached and never moves backwards, so big trends can run.
+- **Volatility sizing:** each trade's risk is scaled between 0.5x and 1.25x depending on whether the coin is wilder or calmer than usual. The 2% hard ceiling still applies.
+- Total money at risk if every coin hits its stop at once stays about the same as the two-coin version, because each coin gets a smaller slice.
 
-**Backtest (Kraken data, Jan 2025 to Nov 2026, fees and funding included):** settings were picked on 2025 data
-and checked on 2026. 2025: +13.2%, worst drawdown 5.8%. 2026: +7.6%, worst drawdown 5.8%. Whole period: +25.1%,
-132 trades, kill switch never tripped. The settings next to these also made money in both periods, which is a better
-sign than a single lucky setting. Past results do not predict future ones.
-Both strategies are reasonable starting points, **not proven money-makers**. Backtest on real data first.
+Both are reasonable starting points, **not proven money-makers**. Backtest on real data first.
 
 ## Quick start
 ```bash

@@ -1,7 +1,7 @@
 """Backtester that drives the same Portfolio (and risk checks) used for paper trading."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,8 @@ class Result:
     trades: dict[str, list[Trade]]
     killed_reason: str | None
     rejections: int
+    groups: dict[str, str] | None = None
+    missed: dict[str, int] | None = None
 
     def summary(self) -> dict:
         eq = self.equity_curve
@@ -38,11 +40,21 @@ class Result:
                 "net_pnl": round(sum(t.pnl for t in trades), 2),
                 "fees_paid": round(sum(t.fees for t in trades), 2),
                 "liquidations": sum(t.reason == "liquidated" for t in trades),
+                "missed_limit_entries": (self.missed or {}).get(name, 0),
             }
+        if self.groups:
+            totals: dict[str, float] = {}
+            for name, g in self.groups.items():
+                totals[g] = totals.get(g, 0.0) + out["sleeves"][name]["net_pnl"]
+            out["net_pnl_by_group"] = {g: round(v, 2) for g, v in totals.items()}
         return out
 
 
 def run_backtest(data: dict[str, pd.DataFrame], cfg: Config) -> Result:
+    missing = [s.symbol for s in cfg.sleeves if s.symbol not in data]
+    if missing:
+        print(f"no data for {', '.join(missing)}: leaving those coins out of this backtest")
+        cfg = replace(cfg, sleeves=[s for s in cfg.sleeves if s.symbol in data])
     idx = None
     for s in cfg.sleeves:
         idx = data[s.symbol].index if idx is None else idx.intersection(data[s.symbol].index)
@@ -58,6 +70,8 @@ def run_backtest(data: dict[str, pd.DataFrame], cfg: Config) -> Result:
         {s.cfg.name: s.broker.trades for s in pf.sleeves},
         pf.guard.killed_reason,
         pf.rejections,
+        {s.cfg.name: s.cfg.group or s.cfg.name for s in pf.sleeves},
+        {s.cfg.name: s.broker.missed_entries for s in pf.sleeves},
     )
 
 

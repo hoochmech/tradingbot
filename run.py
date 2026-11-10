@@ -54,8 +54,8 @@ def _candles(ex, symbol, timeframe, limit=700) -> pd.DataFrame:
 
 def cmd_backtest(cfg, args):
     files = {s.symbol: Path(args.data_dir) / csv_name(s.symbol, cfg.timeframe) for s in cfg.sleeves}
-    if all(f.exists() for f in files.values()):
-        data = {sym: load_csv(str(f)) for sym, f in files.items()}
+    if any(f.exists() for f in files.values()):
+        data = {sym: load_csv(str(f)) for sym, f in files.items() if f.exists()}
     else:
         print("CSV data not found: using SYNTHETIC random-walk data. Results say nothing about real markets.")
         print("Run `python run.py fetch` first for real candles.\n")
@@ -66,7 +66,11 @@ def cmd_backtest(cfg, args):
 def cmd_fetch(cfg, args):
     ex = _exchange(cfg)
     Path(args.data_dir).mkdir(exist_ok=True)
+    ex.load_markets()
     for s in cfg.sleeves:
+        if s.symbol not in ex.markets:
+            print(f"{s.symbol} is not listed on {cfg.exchange}; skipping")
+            continue
         since = ex.parse8601(f"{args.since}T00:00:00Z")
         rows = []
         while True:
@@ -90,7 +94,8 @@ def cmd_paper(cfg, args):
     last_ts, next_beat = None, datetime.now(timezone.utc)
     while True:
         try:
-            frames = {s.symbol: _candles(ex, s.symbol, cfg.timeframe) for s in cfg.sleeves}
+            frames = {s.symbol: _candles(ex, s.symbol, cfg.timeframe, limit=max(700, cfg.vol_lookback + 250))
+                      for s in cfg.sleeves}
         except Exception as e:
             log.warning("data fetch failed: %s", e)
             time.sleep(args.poll)

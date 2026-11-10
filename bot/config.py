@@ -32,34 +32,40 @@ class RiskConfig:
 
 @dataclass
 class SleeveConfig:
-    """One slice of the account running one strategy on one market.
+    """One slice of the account running one strategy on one coin.
 
-    Sleeves trade different symbols so their positions never net against each other on the exchange.
+    Each sleeve trades its own symbol so positions never net against each other on the exchange.
+    `group` ties sleeves together for reporting (e.g. "safe" vs "aggressive").
     """
     name: str
-    weight: float                        # share of the account, e.g. 1 and 2 for a 1:2 split
+    weight: float                        # share of the account; weights are normalized across sleeves
     symbol: str
     strategy: str                        # key in bot.strategy.STRATEGIES
     max_leverage: float
     risk_per_trade_pct: float            # % of this sleeve's equity per trade
     params: dict = field(default_factory=dict)
+    group: str = ""
+
+
+SAFE_COINS = ["BTC", "ETH"]
+AGGRESSIVE_COINS = ["SOL", "XRP", "POL", "ARB"]
+SAFE_PARAMS = {"lookback": 40, "trend_ema": 200, "atr_period": 14,
+               "atr_stop_mult": 3.0, "trail_atr_mult": 6.0}
+AGGRESSIVE_PARAMS = {"lookback": 40, "trend_ema": 200, "atr_period": 14,
+                     "atr_stop_mult": 2.5, "trail_atr_mult": 5.0}
 
 
 def default_sleeves() -> list[SleeveConfig]:
-    return [
-        SleeveConfig(
-            name="safe", weight=1, symbol="BTC/USD:USD", strategy="breakout",
-            max_leverage=2.0, risk_per_trade_pct=0.75,
-            params={"lookback": 40, "trend_ema": 200,
-                    "atr_period": 14, "atr_stop_mult": 3.0, "atr_target_mult": 9.0},
-        ),
-        SleeveConfig(
-            name="aggressive", weight=2, symbol="ETH/USD:USD", strategy="breakout",
-            max_leverage=4.0, risk_per_trade_pct=1.5,
-            params={"lookback": 40, "trend_ema": 200,
-                    "atr_period": 14, "atr_stop_mult": 2.5, "atr_target_mult": 5.0},
-        ),
-    ]
+    """1:2 safe:aggressive by capital. The safe third is split across BTC and ETH, the aggressive
+    two-thirds across SOL, XRP, POL (Polygon) and ARB."""
+    out = []
+    for coin in SAFE_COINS:
+        out.append(SleeveConfig(f"safe-{coin}", 1 / len(SAFE_COINS), f"{coin}/USD:USD", "breakout",
+                                2.0, 0.75, dict(SAFE_PARAMS), "safe"))
+    for coin in AGGRESSIVE_COINS:
+        out.append(SleeveConfig(f"aggr-{coin}", 2 / len(AGGRESSIVE_COINS), f"{coin}/USD:USD", "breakout",
+                                4.0, 1.5, dict(AGGRESSIVE_PARAMS), "aggressive"))
+    return out
 
 
 @dataclass
@@ -69,7 +75,14 @@ class Config:
     timeframe: str = "4h"
     starting_equity: float = 500.0
     taker_fee_pct: float = 0.05
+    maker_fee_pct: float = 0.02          # limit orders that rest on the book
     funding_rate_per_8h_pct: float = 0.01
+    entry_order: str = "limit"           # limit (cheaper, may miss) | market
+    limit_ttl_bars: int = 1              # cancel an unfilled limit entry after this many bars
+    vol_sizing: bool = True              # risk less when a coin is more volatile than usual, more when calmer
+    vol_lookback: int = 500              # bars used to define "usual" volatility
+    vol_scale_min: float = 0.5
+    vol_scale_max: float = 1.25          # still capped by the 2% hard ceiling
     kill_switch_file: str = "KILL"
     state_dir: str = "state"
     heartbeat_hours: float = 6.0         # phone status update interval
@@ -105,6 +118,8 @@ def load_config(path: str | Path = "config.toml") -> Config:
         raise ValueError(f"unknown mode {cfg.mode!r}")
     if len({s.symbol for s in cfg.sleeves}) != len(cfg.sleeves):
         raise ValueError("each sleeve needs its own symbol")
+    if cfg.entry_order not in {"limit", "market"}:
+        raise ValueError("entry_order must be 'limit' or 'market'")
     return cfg
 
 

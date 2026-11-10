@@ -4,7 +4,7 @@
 - breakout: enters when price breaks the recent high/low range, optionally only in the direction of the
   long-term trend (trend_ema).
 
-Both aim for a 2:1 reward-to-risk target. Neither is a proven edge. Backtest on real data before trusting them.
+Exits use either a fixed profit target or a trailing stop (see config). Neither is a proven edge. Backtest on real data before trusting them.
 """
 from __future__ import annotations
 
@@ -24,10 +24,13 @@ def atr(df: pd.DataFrame, period: int) -> pd.Series:
 
 
 def _intent(side: str, entry: float, a: float, p: dict) -> OrderIntent:
-    s, t = p["atr_stop_mult"] * a, p["atr_target_mult"] * a
+    """Stop at atr_stop_mult x ATR. Fixed target at atr_target_mult x ATR, or none when the sleeve
+    uses a trailing stop instead (atr_target_mult missing or 0)."""
+    s = p["atr_stop_mult"] * a
+    t = (p.get("atr_target_mult") or 0) * a
     if side == "long":
-        return OrderIntent("long", entry, entry - s, entry + t)
-    return OrderIntent("short", entry, entry + s, entry - t)
+        return OrderIntent("long", entry, entry - s, entry + t if t else None, a)
+    return OrderIntent("short", entry, entry + s, entry - t if t else None, a)
 
 
 def ema_trend(df: pd.DataFrame, p: dict) -> OrderIntent | None:
